@@ -32,3 +32,20 @@ await QueueRobot.Run(
         });
     });
 ```
+
+You can optionally add a "high priority" queue, which will be processed before the regular queue:
+
+```csharp
+await QueueRobot.Run(
+    "my-robot",
+    (configuration, services) =>
+    {
+        services.AddQueueRobot(options =>
+        {
+            options.QueueName = configuration.GetValue<string>("QueueName");
+            options.HighPriorityQueueName = configuration.GetValue<string>("HighPriorityQueueName");
+            options.AzureStorageConnectionString = configuration.GetConnectionString("StorageConnectionString");
+            options.AddMessageHandler<MyMessageHandler, MyMessage>();
+        });
+    });
+```
