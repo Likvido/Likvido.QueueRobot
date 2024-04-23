@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <Import Project="$(ProjectDir)../version.props" />
+
+    <ItemGroup>
+        <PackageReference Include="Likvido.CloudEvents" Version="1.0.1"/>
+        <PackageReference Include="Likvido.Robot" Version="1.0.2" />
+        <PackageReference Include="Azure.Storage.Queues" Version="12.17.1"/>
+        <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="8.0.0" />
+        <PackageReference Include="Polly.Core" Version="8.3.1" />
+    </ItemGroup>
+
+</Project>
