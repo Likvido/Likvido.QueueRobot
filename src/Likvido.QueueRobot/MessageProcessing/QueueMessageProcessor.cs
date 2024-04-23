@@ -23,19 +23,22 @@ internal sealed class QueueMessageProcessor : IDisposable
     private readonly ResiliencePipeline _updateMessageResiliencyPipeline;
     private readonly SemaphoreSlim _messageReceiptSemaphore = new(1, 1);
     private readonly TelemetryClient _telemetryClient;
+    private readonly string _queueName;
     private readonly QueueClient _queueClient;
 
     private QueueClient? _poisonQueueClient;
 
+    private string PoisonQueueName => $"{_queueName}-poison";
     private QueueClient PoisonQueueClient =>
-        _poisonQueueClient ??= new QueueClient(_workerOptions.AzureStorageConnectionString, _workerOptions.PoisonQueueName);
+        _poisonQueueClient ??= new QueueClient(_workerOptions.AzureStorageConnectionString, PoisonQueueName);
 
     public QueueMessageProcessor(
         ILogger logger,
         QueueClient queueClient,
         IServiceProvider serviceProvider,
         QueueRobotOptions workerOptions,
-        TelemetryClient telemetryClient)
+        TelemetryClient telemetryClient,
+        string queueName)
     {
         _logger = logger;
         _queueClient = queueClient;
@@ -44,6 +47,7 @@ internal sealed class QueueMessageProcessor : IDisposable
         _deleteMessageResiliencePipeline = GetMessageActionResiliencePipeline("Message deletion from a queue \"{queueName}\" failed #{retryAttempt}");
         _updateMessageResiliencyPipeline = GetMessageActionResiliencePipeline("Message update in a queue \"{queueName}\" failed #{retryAttempt}");
         _telemetryClient = telemetryClient;
+        _queueName = queueName;
     }
 
     public async Task ProcessMessage(QueueMessage queueMessage, CancellationToken stoppingToken)
@@ -64,12 +68,12 @@ internal sealed class QueueMessageProcessor : IDisposable
         {
             messageDetails = new MessageDetails(queueMessage);
 
-            operation = _telemetryClient.StartOperation<RequestTelemetry>(_workerOptions.OperationName);
+            operation = _telemetryClient.StartOperation<RequestTelemetry>($"Process {_queueName}");
             operation.Telemetry.Properties["InvocationId"] = queueMessage.MessageId;
             operation.Telemetry.Properties["MessageId"] = queueMessage.MessageId;
-            operation.Telemetry.Properties["OperationName"] = _workerOptions.OperationName;
-            operation.Telemetry.Properties["TriggerReason"] = $"New queue message detected on '{_workerOptions.QueueName}'.";
-            operation.Telemetry.Properties["QueueName"] = _workerOptions.QueueName;
+            operation.Telemetry.Properties["OperationName"] = $"Process {_queueName}";
+            operation.Telemetry.Properties["TriggerReason"] = $"New queue message detected on '{_queueName}'.";
+            operation.Telemetry.Properties["QueueName"] = _queueName;
             operation.Telemetry.Properties["Robot"] = Assembly.GetEntryAssembly()?.GetName().Name;
 
             updateVisibilityStopAction = await StartKeepMessageInvisibleAsync(_queueClient, messageDetails);
@@ -194,7 +198,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "TryMoveToPoisonAsync failed poison queue{poison_queue}", _workerOptions.PoisonQueueName);
+                _logger.LogError(e, "TryMoveToPoisonAsync failed. Poison queue: {PoisonQueue}", PoisonQueueName);
             }
         }
     }
@@ -267,7 +271,7 @@ internal sealed class QueueMessageProcessor : IDisposable
                 BackoffType = DelayBackoffType.Exponential,
                 OnRetry = args =>
                 {
-                    _logger.LogError(args.Outcome.Exception, failureText, _workerOptions.QueueName, args.AttemptNumber);
+                    _logger.LogError(args.Outcome.Exception, failureText, _queueName, args.AttemptNumber);
                     return default;
                 }
             })

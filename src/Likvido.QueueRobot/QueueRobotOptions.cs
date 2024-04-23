@@ -19,6 +19,11 @@ public class QueueRobotOptions
     public required string QueueName { get; set; }
 
     /// <summary>
+    /// Optional name of the queue to read high priority messages from (messages from this queue is read before the normal queue)
+    /// </summary>
+    public string? HighPriorityQueueName { get; set; }
+
+    /// <summary>
     /// The maximum number of times a message will be retried
     /// Default is 5
     /// </summary>
@@ -29,10 +34,6 @@ public class QueueRobotOptions
     /// Default 30 seconds which is default for QueueClient.ReceiveMessagesAsync
     /// </summary>
     public TimeSpan VisibilityTimeout { get; set; } = TimeSpan.FromSeconds(30);
-
-    internal string PoisonQueueName => QueueName + "-poison";
-
-    internal string OperationName => $"Process {QueueName}";
 
     [RequiredCollection]
     internal IDictionary<string, (Type MessageType, Type HandlerType)> EventTypeHandlerDictionary { get; } = new Dictionary<string, (Type, Type)>(StringComparer.OrdinalIgnoreCase);
