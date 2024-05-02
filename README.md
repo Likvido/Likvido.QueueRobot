@@ -26,7 +26,7 @@ await QueueRobot.Run(
     {
         services.AddQueueRobot(options =>
         {
-            options.QueueName = configuration.GetValue<string>("QueueName");
+            options.QueueName = configuration.GetRequiredValue("QueueName");
             options.AzureStorageConnectionString = configuration.GetConnectionString("StorageConnectionString");
             options.AddMessageHandler<MyMessageHandler, MyMessage>();
         });
@@ -42,8 +42,8 @@ await QueueRobot.Run(
     {
         services.AddQueueRobot(options =>
         {
-            options.QueueName = configuration.GetValue<string>("QueueName");
-            options.HighPriorityQueueName = configuration.GetValue<string>("HighPriorityQueueName");
+            options.QueueName = configuration.GetRequiredValue("QueueName");
+            options.HighPriorityQueueName = configuration.GetRequiredValue("HighPriorityQueueName");
             options.AzureStorageConnectionString = configuration.GetConnectionString("StorageConnectionString");
             options.AddMessageHandler<MyMessageHandler, MyMessage>();
         });
