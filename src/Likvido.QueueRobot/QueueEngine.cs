@@ -17,15 +17,30 @@ public class QueueEngine(
 {
     public async Task Run(CancellationToken cancellationToken)
     {
-        var processedHighPriorityMessage = false;
-        if (!string.IsNullOrWhiteSpace(options.HighPriorityQueueName))
+        for (var i = 0; i < options.MaxMessagesToProcess; i++)
         {
-            processedHighPriorityMessage = await ProcessMessageFromQueue(options.HighPriorityQueueName, cancellationToken);
-        }
+            var messageProcessed = false;
+            if (!string.IsNullOrWhiteSpace(options.HighPriorityQueueName))
+            {
+                messageProcessed = await ProcessMessageFromQueue(options.HighPriorityQueueName, cancellationToken);
+            }
 
-        if (!processedHighPriorityMessage)
-        {
-            await ProcessMessageFromQueue(options.QueueName, cancellationToken);
+            if (!messageProcessed)
+            {
+                messageProcessed = await ProcessMessageFromQueue(options.QueueName, cancellationToken);
+            }
+
+            if (!messageProcessed)
+            {
+                logger.LogInformation("No messages in any queue, stopping...");
+                break;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                logger.LogInformation("Cancellation requested, stopping...");
+                break;
+            }
         }
     }
 
