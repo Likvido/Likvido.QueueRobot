@@ -3,6 +3,7 @@ using System.Text.Json;
 using Azure.Storage.Queues;
 using Azure.Storage.Queues.Models;
 using Likvido.CloudEvents;
+using Likvido.QueueRobot.Exceptions;
 using Likvido.QueueRobot.MessageHandling;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
@@ -97,6 +98,21 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 operation.Telemetry.Success = false;
                 operation.Telemetry.ResponseCode = "400";
+            }
+        }
+        catch (PostponeProcessingException postponeProcessingException)
+        {
+            _logger.LogInformation(postponeProcessingException, "Postpone processing for {PostponeTime}", postponeProcessingException.PostponeTime);
+
+            if (!processed && messageDetails != null)
+            {
+                await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
+            }
+
+            if (operation != null)
+            {
+                operation.Telemetry.Success = false;
+                operation.Telemetry.ResponseCode = "202";
             }
         }
         catch (Exception ex)
