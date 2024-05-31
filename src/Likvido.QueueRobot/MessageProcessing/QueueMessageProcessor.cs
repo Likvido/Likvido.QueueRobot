@@ -235,20 +235,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             do
             {
                 await Task.Delay(sleep, token);
-
-                await ModifyMessageAsync(async () =>
-                {
-                    var result = await _updateMessageResiliencyPipeline.ExecuteAsync(async cancellationToken =>
-                        await queueClient.UpdateMessageAsync(
-                            messageDetails.Message.MessageId,
-                            messageDetails.Receipt,
-                            messageDetails.Message.MessageText,
-                            _workerOptions.VisibilityTimeout,
-                            cancellationToken), token);
-
-                    //all further operations should be done with the new receipt otherwise 404
-                    messageDetails.Receipt = result.Value.PopReceipt;
-                }, token);
+                await UpdateVisibilityTimeout(queueClient, messageDetails, _workerOptions.VisibilityTimeout, token);
             } while (true);
         }
         catch (OperationCanceledException)
@@ -260,6 +247,21 @@ internal sealed class QueueMessageProcessor : IDisposable
             _logger.LogError(e, "Update message visibility has failed.");
         }
     }
+
+    private async Task UpdateVisibilityTimeout(QueueClient queueClient, MessageDetails messageDetails, TimeSpan newVisibilityTimeout, CancellationToken token) =>
+        await ModifyMessageAsync(async () =>
+        {
+            var result = await _updateMessageResiliencyPipeline.ExecuteAsync(async cancellationToken =>
+                await queueClient.UpdateMessageAsync(
+                    messageDetails.Message.MessageId,
+                    messageDetails.Receipt,
+                    messageDetails.Message.MessageText,
+                    newVisibilityTimeout,
+                    cancellationToken), token);
+
+            //all further operations should be done with the new receipt otherwise we get 404
+            messageDetails.Receipt = result.Value.PopReceipt;
+        }, token);
 
     private ResiliencePipeline GetMessageActionResiliencePipeline(string failureText) =>
         new ResiliencePipelineBuilder()
@@ -278,8 +280,8 @@ internal sealed class QueueMessageProcessor : IDisposable
             .Build();
 
     /// <summary>
-    /// Any operations to a message need to be done via this helper function
-    /// Each message update changes a message receipt and causes 404 result with a previous receipt 
+    /// All operations to a message need to be done via this helper function
+    /// Each message update changes the message receipt and causes a 404 result with a previous receipt 
     /// </summary>
     /// <param name="callback"></param>
     /// <param name="token"></param>
