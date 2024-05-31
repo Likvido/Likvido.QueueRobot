@@ -3,6 +3,7 @@ using System.Text.Json;
 using Azure.Storage.Queues;
 using Azure.Storage.Queues.Models;
 using Likvido.CloudEvents;
+using Likvido.QueueRobot.Exceptions;
 using Likvido.QueueRobot.MessageHandling;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
@@ -97,6 +98,21 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 operation.Telemetry.Success = false;
                 operation.Telemetry.ResponseCode = "400";
+            }
+        }
+        catch (PostponeProcessingException postponeProcessingException)
+        {
+            _logger.LogInformation(postponeProcessingException, "Postpone processing for {PostponeTime}", postponeProcessingException.PostponeTime);
+
+            if (!processed && messageDetails != null)
+            {
+                await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
+            }
+
+            if (operation != null)
+            {
+                operation.Telemetry.Success = false;
+                operation.Telemetry.ResponseCode = "202";
             }
         }
         catch (Exception ex)
@@ -235,20 +251,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             do
             {
                 await Task.Delay(sleep, token);
-
-                await ModifyMessageAsync(async () =>
-                {
-                    var result = await _updateMessageResiliencyPipeline.ExecuteAsync(async cancellationToken =>
-                        await queueClient.UpdateMessageAsync(
-                            messageDetails.Message.MessageId,
-                            messageDetails.Receipt,
-                            messageDetails.Message.MessageText,
-                            _workerOptions.VisibilityTimeout,
-                            cancellationToken), token);
-
-                    //all further operations should be done with the new receipt otherwise 404
-                    messageDetails.Receipt = result.Value.PopReceipt;
-                }, token);
+                await UpdateVisibilityTimeout(queueClient, messageDetails, _workerOptions.VisibilityTimeout, token);
             } while (true);
         }
         catch (OperationCanceledException)
@@ -260,6 +263,21 @@ internal sealed class QueueMessageProcessor : IDisposable
             _logger.LogError(e, "Update message visibility has failed.");
         }
     }
+
+    private async Task UpdateVisibilityTimeout(QueueClient queueClient, MessageDetails messageDetails, TimeSpan newVisibilityTimeout, CancellationToken token) =>
+        await ModifyMessageAsync(async () =>
+        {
+            var result = await _updateMessageResiliencyPipeline.ExecuteAsync(async cancellationToken =>
+                await queueClient.UpdateMessageAsync(
+                    messageDetails.Message.MessageId,
+                    messageDetails.Receipt,
+                    messageDetails.Message.MessageText,
+                    newVisibilityTimeout,
+                    cancellationToken), token);
+
+            //all further operations should be done with the new receipt otherwise we get 404
+            messageDetails.Receipt = result.Value.PopReceipt;
+        }, token);
 
     private ResiliencePipeline GetMessageActionResiliencePipeline(string failureText) =>
         new ResiliencePipelineBuilder()
@@ -278,8 +296,8 @@ internal sealed class QueueMessageProcessor : IDisposable
             .Build();
 
     /// <summary>
-    /// Any operations to a message need to be done via this helper function
-    /// Each message update changes a message receipt and causes 404 result with a previous receipt 
+    /// All operations to a message need to be done via this helper function
+    /// Each message update changes the message receipt and causes a 404 result with a previous receipt 
     /// </summary>
     /// <param name="callback"></param>
     /// <param name="token"></param>
