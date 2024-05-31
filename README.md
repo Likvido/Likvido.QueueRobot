@@ -49,3 +49,7 @@ await QueueRobot.Run(
         });
     });
 ```
+
+## Postpone processing a message
+
+Under some circumstances, you might wish to postpone the processing of a given message for some time period. Maybe calling some dependency fails, and you wish to delay the retry for some extended period of time (if you only want to delay for seconds, then you could consider just using Task.Delay). To do this, we have added a special exception you can throw, called `PostponeProcessingException`. With this exception, you can supply a TimeSpan, which indicates how long you wish to postpone processing the message. The library will then update the visibility timeout on the message, so that it will be invisible for the time period you specified. Note that the max time period allowed for postponing a message is 7 days (this is a limitation in Azure Storage Queues)
