@@ -4,6 +4,7 @@ using JetBrains.Annotations;
 using Likvido.QueueRobot.MessageProcessing;
 using Likvido.Robot;
 using Microsoft.ApplicationInsights;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Likvido.QueueRobot;
@@ -17,6 +18,8 @@ public class QueueEngine(
 {
     public async Task Run(CancellationToken cancellationToken)
     {
+        AssertAllMessageHandlersCanBeConstructed();
+
         for (var i = 0; i < options.MaxMessagesToProcess; i++)
         {
             var messageProcessed = false;
@@ -41,6 +44,14 @@ public class QueueEngine(
                 logger.LogInformation("Cancellation requested, stopping...");
                 break;
             }
+        }
+    }
+
+    private void AssertAllMessageHandlersCanBeConstructed()
+    {
+        foreach (var (_, handlerType) in options.EventTypeHandlerDictionary.Values)
+        {
+            serviceProvider.GetRequiredService(handlerType);
         }
     }
 
