@@ -4,6 +4,7 @@ using Azure.Storage.Queues;
 using Azure.Storage.Queues.Models;
 using Likvido.CloudEvents;
 using Likvido.QueueRobot.Exceptions;
+using Likvido.QueueRobot.JsonConverters;
 using Likvido.QueueRobot.MessageHandling;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
@@ -148,15 +149,18 @@ internal sealed class QueueMessageProcessor : IDisposable
         var (messageType, handlerType) = GetDataTypes(messageDetails.Message);
         var cloudEventType = typeof(CloudEvent<>).MakeGenericType(messageType);
         var lastAttempt = messageDetails.Message.DequeueCount >= _workerOptions.MaxRetryCount;
+        var jsonSerializerOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            AllowTrailingCommas = true,
+            ReadCommentHandling = JsonCommentHandling.Skip
+        };
+        jsonSerializerOptions.Converters.Add(new LikvidoPriorityConverter());
+
         var message = JsonSerializer.Deserialize(
             messageDetails.Message.GetMessageText(),
             cloudEventType,
-            new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-                AllowTrailingCommas = true,
-                ReadCommentHandling = JsonCommentHandling.Skip
-            })!;
+            jsonSerializerOptions)!;
 
         var messageHandler = (IMessageHandlerBase)scope.ServiceProvider.GetRequiredService(handlerType);
         await messageHandler.HandleMessage(message, lastAttempt, stoppingToken);
