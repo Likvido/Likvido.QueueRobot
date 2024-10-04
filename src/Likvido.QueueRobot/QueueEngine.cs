@@ -1,6 +1,7 @@
 using System.Reflection;
 using Azure.Storage.Queues;
 using JetBrains.Annotations;
+using Likvido.CloudEvents;
 using Likvido.QueueRobot.MessageProcessing;
 using Likvido.Robot;
 using Microsoft.ApplicationInsights;
@@ -25,12 +26,12 @@ public class QueueEngine(
             var messageProcessed = false;
             if (!string.IsNullOrWhiteSpace(options.HighPriorityQueueName))
             {
-                messageProcessed = await ProcessMessageFromQueue(options.HighPriorityQueueName, cancellationToken);
+                messageProcessed = await ProcessMessageFromQueue(options.HighPriorityQueueName, LikvidoPriority.High, cancellationToken);
             }
 
             if (!messageProcessed)
             {
-                messageProcessed = await ProcessMessageFromQueue(options.QueueName, cancellationToken);
+                messageProcessed = await ProcessMessageFromQueue(options.QueueName, LikvidoPriority.Normal, cancellationToken);
             }
 
             if (!messageProcessed)
@@ -55,10 +56,10 @@ public class QueueEngine(
         }
     }
 
-    private async Task<bool> ProcessMessageFromQueue(string queueName, CancellationToken cancellationToken)
+    private async Task<bool> ProcessMessageFromQueue(string queueName, LikvidoPriority priority, CancellationToken cancellationToken)
     {
         var processorName = Assembly.GetEntryAssembly()?.GetName().Name;
-        using var logScope = logger.BeginScope("{Processor} reads {QueueName}", processorName, queueName);
+        using var logScope = logger.BeginScope("{Processor} reads {QueueName} (priority: {Priority}", processorName, queueName, Enum.GetName(priority));
         try
         {
             var queueClient = new QueueClient(options.AzureStorageConnectionString, queueName);
@@ -79,7 +80,7 @@ public class QueueEngine(
                 return false;
             }
 
-            await processor.ProcessMessage(queueMessage, cancellationToken);
+            await processor.ProcessMessage(queueMessage, priority, cancellationToken);
 
             telemetryClient.Flush();
         }
