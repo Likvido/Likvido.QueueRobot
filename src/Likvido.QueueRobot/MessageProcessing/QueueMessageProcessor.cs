@@ -52,7 +52,7 @@ internal sealed class QueueMessageProcessor : IDisposable
         _queueName = queueName;
     }
 
-    public async Task ProcessMessage(QueueMessage queueMessage, CancellationToken stoppingToken)
+    public async Task ProcessMessage(QueueMessage queueMessage, LikvidoPriority priority, CancellationToken stoppingToken)
     {
         ArgumentNullException.ThrowIfNull(queueMessage);
 
@@ -76,12 +76,13 @@ internal sealed class QueueMessageProcessor : IDisposable
             operation.Telemetry.Properties["OperationName"] = $"Process {_queueName}";
             operation.Telemetry.Properties["TriggerReason"] = $"New queue message detected on '{_queueName}'.";
             operation.Telemetry.Properties["QueueName"] = _queueName;
+            operation.Telemetry.Properties["Priority"] = Enum.GetName(priority);
             operation.Telemetry.Properties["Robot"] = Assembly.GetEntryAssembly()?.GetName().Name;
 
             updateVisibilityStopAction = await StartKeepMessageInvisibleAsync(_queueClient, messageDetails);
 
             scope = _serviceProvider.CreateScope();
-            await ProcessMessage(messageDetails, scope, stoppingToken);
+            await ProcessMessage(messageDetails, priority, scope, stoppingToken);
 
             stoppingToken.ThrowIfCancellationRequested();
 
@@ -141,10 +142,7 @@ internal sealed class QueueMessageProcessor : IDisposable
         }
     }
 
-    private async Task ProcessMessage(
-        MessageDetails messageDetails,
-        IServiceScope scope,
-        CancellationToken stoppingToken)
+    private async Task ProcessMessage(MessageDetails messageDetails, LikvidoPriority priority, IServiceScope scope, CancellationToken stoppingToken)
     {
         var (messageType, handlerType) = GetDataTypes(messageDetails.Message);
         var cloudEventType = typeof(CloudEvent<>).MakeGenericType(messageType);
@@ -163,7 +161,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             jsonSerializerOptions)!;
 
         var messageHandler = (IMessageHandlerBase)scope.ServiceProvider.GetRequiredService(handlerType);
-        await messageHandler.HandleMessage(message, lastAttempt, stoppingToken);
+        await messageHandler.HandleMessage(message, priority, lastAttempt, stoppingToken);
     }
 
     private (Type MessageType, Type HandlerType) GetDataTypes(QueueMessage message)
