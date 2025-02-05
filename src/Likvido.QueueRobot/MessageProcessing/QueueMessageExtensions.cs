@@ -21,9 +21,10 @@ internal static class QueueMessageExtensions
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to decode base64 string. Length: {Length}, First 200 chars: {MessagePreview}",
+            const int truncateLength = 300;
+            logger.LogError(ex, "Failed to decode base64 string. Length: {Length}, First " + truncateLength + " chars: {MessagePreview}",
                 message.MessageText?.Length,
-                message.MessageText?.Substring(0, Math.Min(message.MessageText?.Length ?? 0, 200)));
+                message.MessageText?.Substring(0, Math.Min(message.MessageText?.Length ?? 0, truncateLength)));
 
             throw;
         }
