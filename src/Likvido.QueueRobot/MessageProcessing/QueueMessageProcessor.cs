@@ -6,9 +6,6 @@ using Likvido.CloudEvents;
 using Likvido.QueueRobot.Exceptions;
 using Likvido.QueueRobot.JsonConverters;
 using Likvido.QueueRobot.MessageHandling;
-using Microsoft.ApplicationInsights;
-using Microsoft.ApplicationInsights.DataContracts;
-using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -24,7 +21,6 @@ internal sealed class QueueMessageProcessor : IDisposable
     private readonly ResiliencePipeline _deleteMessageResiliencePipeline;
     private readonly ResiliencePipeline _updateMessageResiliencyPipeline;
     private readonly SemaphoreSlim _messageReceiptSemaphore = new(1, 1);
-    private readonly TelemetryClient _telemetryClient;
     private readonly string _queueName;
     private readonly QueueClient _queueClient;
 
@@ -39,7 +35,6 @@ internal sealed class QueueMessageProcessor : IDisposable
         QueueClient queueClient,
         IServiceProvider serviceProvider,
         QueueRobotOptions workerOptions,
-        TelemetryClient telemetryClient,
         string queueName)
     {
         _logger = logger;
@@ -48,7 +43,6 @@ internal sealed class QueueMessageProcessor : IDisposable
         _serviceProvider = serviceProvider;
         _deleteMessageResiliencePipeline = GetMessageActionResiliencePipeline("Message deletion from a queue \"{queueName}\" failed #{retryAttempt}");
         _updateMessageResiliencyPipeline = GetMessageActionResiliencePipeline("Message update in a queue \"{queueName}\" failed #{retryAttempt}");
-        _telemetryClient = telemetryClient;
         _queueName = queueName;
     }
 
@@ -56,28 +50,23 @@ internal sealed class QueueMessageProcessor : IDisposable
     {
         ArgumentNullException.ThrowIfNull(queueMessage);
 
-        //Running this as separate task gives the following benefits
-        //1. ExecutionContext isn't overlap between message handlers
-        //2. Makes message parallel processing easier
-        await Task.Yield();//makes execution parallel immediately for the reasons above
+        // Forcing this to run as a separate task ensures that the ExecutionContext does not overlap between message handlers
+        await Task.Yield();
+
+        using var _ = _logger.BeginScope(new Dictionary<string, object>
+        {
+            ["MessageId"] = queueMessage.MessageId,
+            ["QueueName"] = _queueName,
+            ["Priority"] = Enum.GetName(priority) ?? "Unknown"
+        });
 
         var processed = false;
         MessageDetails? messageDetails = null;
         IServiceScope? scope = null;
         IAsyncDisposable? updateVisibilityStopAction = null;
-        IOperationHolder<RequestTelemetry>? operation = null;
         try
         {
             messageDetails = new MessageDetails(queueMessage);
-
-            operation = _telemetryClient.StartOperation<RequestTelemetry>($"Process {_queueName}");
-            operation.Telemetry.Properties["InvocationId"] = queueMessage.MessageId;
-            operation.Telemetry.Properties["MessageId"] = queueMessage.MessageId;
-            operation.Telemetry.Properties["OperationName"] = $"Process {_queueName}";
-            operation.Telemetry.Properties["TriggerReason"] = $"New queue message detected on '{_queueName}'.";
-            operation.Telemetry.Properties["QueueName"] = _queueName;
-            operation.Telemetry.Properties["Priority"] = Enum.GetName(priority);
-            operation.Telemetry.Properties["Robot"] = Assembly.GetEntryAssembly()?.GetName().Name;
 
             updateVisibilityStopAction = await StartKeepMessageInvisibleAsync(_queueClient, messageDetails);
 
@@ -87,20 +76,12 @@ internal sealed class QueueMessageProcessor : IDisposable
             stoppingToken.ThrowIfCancellationRequested();
 
             processed = true;
-            _telemetryClient.TrackTrace("Processor finished"); //short cut for now. TOOD:// wrap processing in a separate operation
 
             await DeleteMessageAsync(_queueClient, messageDetails, updateVisibilityStopAction);
-            operation.Telemetry.Success = true;
-            operation.Telemetry.ResponseCode = "0";
         }
         catch (OperationCanceledException)
         {
             _logger.LogInformation("Operation was cancelled.");
-            if (operation != null)
-            {
-                operation.Telemetry.Success = false;
-                operation.Telemetry.ResponseCode = "400";
-            }
         }
         catch (PostponeProcessingException postponeProcessingException)
         {
@@ -109,12 +90,6 @@ internal sealed class QueueMessageProcessor : IDisposable
             if (!processed && messageDetails != null)
             {
                 await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
-            }
-
-            if (operation != null)
-            {
-                operation.Telemetry.Success = false;
-                operation.Telemetry.ResponseCode = "202";
             }
         }
         catch (Exception ex)
@@ -125,11 +100,6 @@ internal sealed class QueueMessageProcessor : IDisposable
             }
 
             _logger.LogError(ex, "Unhandled exception occurred during message processing.");
-            if (operation != null)
-            {
-                operation.Telemetry.Success = false;
-                operation.Telemetry.ResponseCode = "500";
-            }
         }
         finally
         {
@@ -138,7 +108,6 @@ internal sealed class QueueMessageProcessor : IDisposable
                 await updateVisibilityStopAction.DisposeAsync();
             }
             scope?.Dispose();
-            operation?.Dispose();
         }
     }
 
