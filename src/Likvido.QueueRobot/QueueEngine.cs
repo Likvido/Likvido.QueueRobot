@@ -4,7 +4,6 @@ using JetBrains.Annotations;
 using Likvido.CloudEvents;
 using Likvido.QueueRobot.MessageProcessing;
 using Likvido.Robot;
-using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -14,7 +13,6 @@ namespace Likvido.QueueRobot;
 public class QueueEngine(
     ILogger<QueueEngine> logger,
     IServiceProvider serviceProvider,
-    TelemetryClient telemetryClient,
     QueueRobotOptions options) : ILikvidoRobotEngine
 {
     public async Task Run(CancellationToken cancellationToken)
@@ -69,7 +67,6 @@ public class QueueEngine(
                 queueClient,
                 serviceProvider,
                 options,
-                telemetryClient,
                 queueName);
 
             var queueMessageResponse = await queueClient.ReceiveMessagesAsync(1, options.VisibilityTimeout, cancellationToken);
@@ -81,8 +78,6 @@ public class QueueEngine(
             }
 
             await processor.ProcessMessage(queueMessage, priority, cancellationToken);
-
-            telemetryClient.Flush();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -92,7 +87,7 @@ public class QueueEngine(
             logger.LogError(ex, "Unhandled exception");
             throw;
         }
-        
+
         return true;
     }
 }

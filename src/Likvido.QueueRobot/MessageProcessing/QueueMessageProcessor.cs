@@ -6,9 +6,6 @@ using Likvido.CloudEvents;
 using Likvido.QueueRobot.Exceptions;
 using Likvido.QueueRobot.JsonConverters;
 using Likvido.QueueRobot.MessageHandling;
-using Microsoft.ApplicationInsights;
-using Microsoft.ApplicationInsights.DataContracts;
-using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -24,7 +21,6 @@ internal sealed class QueueMessageProcessor : IDisposable
     private readonly ResiliencePipeline _deleteMessageResiliencePipeline;
     private readonly ResiliencePipeline _updateMessageResiliencyPipeline;
     private readonly SemaphoreSlim _messageReceiptSemaphore = new(1, 1);
-    private readonly TelemetryClient _telemetryClient;
     private readonly string _queueName;
     private readonly QueueClient _queueClient;
 
@@ -39,7 +35,6 @@ internal sealed class QueueMessageProcessor : IDisposable
         QueueClient queueClient,
         IServiceProvider serviceProvider,
         QueueRobotOptions workerOptions,
-        TelemetryClient telemetryClient,
         string queueName)
     {
         _logger = logger;
@@ -48,7 +43,6 @@ internal sealed class QueueMessageProcessor : IDisposable
         _serviceProvider = serviceProvider;
         _deleteMessageResiliencePipeline = GetMessageActionResiliencePipeline("Message deletion from a queue \"{queueName}\" failed #{retryAttempt}");
         _updateMessageResiliencyPipeline = GetMessageActionResiliencePipeline("Message update in a queue \"{queueName}\" failed #{retryAttempt}");
-        _telemetryClient = telemetryClient;
         _queueName = queueName;
     }
 
@@ -56,28 +50,23 @@ internal sealed class QueueMessageProcessor : IDisposable
     {
         ArgumentNullException.ThrowIfNull(queueMessage);
 
-        //Running this as separate task gives the following benefits
-        //1. ExecutionContext isn't overlap between message handlers
-        //2. Makes message parallel processing easier
-        await Task.Yield();//makes execution parallel immediately for the reasons above
+        // Forcing this to run as a separate task ensures that the ExecutionContext does not overlap between message handlers
+        await Task.Yield();
+
+        using var _ = _logger.BeginScope(new Dictionary<string, object>
+        {
+            ["MessageId"] = queueMessage.MessageId,
+            ["QueueName"] = _queueName,
+            ["Priority"] = Enum.GetName(priority) ?? "Unknown"
+        });
 
         var processed = false;
         MessageDetails? messageDetails = null;
         IServiceScope? scope = null;
         IAsyncDisposable? updateVisibilityStopAction = null;
-        IOperationHolder<RequestTelemetry>? operation = null;
         try
         {
             messageDetails = new MessageDetails(queueMessage);
-
-            operation = _telemetryClient.StartOperation<RequestTelemetry>($"Process {_queueName}");
-            operation.Telemetry.Properties["InvocationId"] = queueMessage.MessageId;
-            operation.Telemetry.Properties["MessageId"] = queueMessage.MessageId;
-            operation.Telemetry.Properties["OperationName"] = $"Process {_queueName}";
-            operation.Telemetry.Properties["TriggerReason"] = $"New queue message detected on '{_queueName}'.";
-            operation.Telemetry.Properties["QueueName"] = _queueName;
-            operation.Telemetry.Properties["Priority"] = Enum.GetName(priority);
-            operation.Telemetry.Properties["Robot"] = Assembly.GetEntryAssembly()?.GetName().Name;
 
             updateVisibilityStopAction = await StartKeepMessageInvisibleAsync(_queueClient, messageDetails);
 
@@ -87,20 +76,12 @@ internal sealed class QueueMessageProcessor : IDisposable
             stoppingToken.ThrowIfCancellationRequested();
 
             processed = true;
-            _telemetryClient.TrackTrace("Processor finished"); //short cut for now. TOOD:// wrap processing in a separate operation
 
             await DeleteMessageAsync(_queueClient, messageDetails, updateVisibilityStopAction);
-            operation.Telemetry.Success = true;
-            operation.Telemetry.ResponseCode = "0";
         }
         catch (OperationCanceledException)
         {
             _logger.LogInformation("Operation was cancelled.");
-            if (operation != null)
-            {
-                operation.Telemetry.Success = false;
-                operation.Telemetry.ResponseCode = "400";
-            }
         }
         catch (PostponeProcessingException postponeProcessingException)
         {
@@ -110,25 +91,35 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
             }
-
-            if (operation != null)
-            {
-                operation.Telemetry.Success = false;
-                operation.Telemetry.ResponseCode = "202";
-            }
         }
         catch (Exception ex)
         {
-            if (!processed && messageDetails != null)
+            if (messageDetails == null)
             {
-                await TryMoveToPoisonAsync(_queueClient, messageDetails, updateVisibilityStopAction);
+                _logger.LogError(ex, "Unhandled exception occurred during message processing, and messageDetails is null.");
             }
-
-            _logger.LogError(ex, "Unhandled exception occurred during message processing.");
-            if (operation != null)
+            else if (IsLastAttempt(messageDetails))
             {
-                operation.Telemetry.Success = false;
-                operation.Telemetry.ResponseCode = "500";
+                if (processed)
+                {
+                    _logger.LogError(ex, "Unhandled exception occurred during message processing. Message was successfully processed.");
+                }
+                else
+                {
+                    _logger.LogError(ex, "Unhandled exception occurred during message processing. Message was not processed, and it will be moved to the poison queue.");
+                    await TryMoveToPoisonAsync(_queueClient, messageDetails, updateVisibilityStopAction);
+                }
+            }
+            else
+            {
+                if (processed)
+                {
+                    _logger.LogError(ex, "Unhandled exception occurred during message processing. Message was successfully processed.");
+                }
+                else
+                {
+                    _logger.LogWarning(ex, "Unhandled exception occurred during message processing. Message will be retried within {VisibilityTimeoutTotalSeconds} seconds.", _workerOptions.VisibilityTimeout.TotalSeconds);
+                }
             }
         }
         finally
@@ -137,8 +128,8 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 await updateVisibilityStopAction.DisposeAsync();
             }
+
             scope?.Dispose();
-            operation?.Dispose();
         }
     }
 
@@ -146,7 +137,6 @@ internal sealed class QueueMessageProcessor : IDisposable
     {
         var (messageType, handlerType) = GetDataTypes(messageDetails.Message);
         var cloudEventType = typeof(CloudEvent<>).MakeGenericType(messageType);
-        var lastAttempt = messageDetails.Message.DequeueCount >= _workerOptions.MaxRetryCount;
         var jsonSerializerOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -161,7 +151,12 @@ internal sealed class QueueMessageProcessor : IDisposable
             jsonSerializerOptions)!;
 
         var messageHandler = (IMessageHandlerBase)scope.ServiceProvider.GetRequiredService(handlerType);
-        await messageHandler.HandleMessage(message, priority, lastAttempt, stoppingToken);
+        await messageHandler.HandleMessage(message, priority, IsLastAttempt(messageDetails), stoppingToken);
+    }
+
+    private bool IsLastAttempt(MessageDetails messageDetails)
+    {
+        return messageDetails.Message.DequeueCount >= _workerOptions.MaxRetryCount;
     }
 
     private (Type MessageType, Type HandlerType) GetDataTypes(QueueMessage message)
