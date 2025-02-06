@@ -94,12 +94,33 @@ internal sealed class QueueMessageProcessor : IDisposable
         }
         catch (Exception ex)
         {
-            if (!processed && messageDetails != null)
+            if (messageDetails == null)
             {
-                await TryMoveToPoisonAsync(_queueClient, messageDetails, updateVisibilityStopAction);
+                _logger.LogError(ex, "Unhandled exception occurred during message processing, and messageDetails is null.");
             }
-
-            _logger.LogError(ex, "Unhandled exception occurred during message processing.");
+            else if (IsLastAttempt(messageDetails))
+            {
+                if (processed)
+                {
+                    _logger.LogError(ex, "Unhandled exception occurred during message processing. Message was successfully processed.");
+                }
+                else
+                {
+                    _logger.LogError(ex, "Unhandled exception occurred during message processing. Message was not processed, and it will be moved to the poison queue.");
+                    await TryMoveToPoisonAsync(_queueClient, messageDetails, updateVisibilityStopAction);
+                }
+            }
+            else
+            {
+                if (processed)
+                {
+                    _logger.LogError(ex, "Unhandled exception occurred during message processing. Message was successfully processed.");
+                }
+                else
+                {
+                    _logger.LogWarning(ex, "Unhandled exception occurred during message processing. Message will be retried within {VisibilityTimeoutTotalSeconds} seconds.", _workerOptions.VisibilityTimeout.TotalSeconds);
+                }
+            }
         }
         finally
         {
@@ -107,6 +128,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 await updateVisibilityStopAction.DisposeAsync();
             }
+
             scope?.Dispose();
         }
     }
@@ -115,7 +137,6 @@ internal sealed class QueueMessageProcessor : IDisposable
     {
         var (messageType, handlerType) = GetDataTypes(messageDetails.Message);
         var cloudEventType = typeof(CloudEvent<>).MakeGenericType(messageType);
-        var lastAttempt = messageDetails.Message.DequeueCount >= _workerOptions.MaxRetryCount;
         var jsonSerializerOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -130,7 +151,12 @@ internal sealed class QueueMessageProcessor : IDisposable
             jsonSerializerOptions)!;
 
         var messageHandler = (IMessageHandlerBase)scope.ServiceProvider.GetRequiredService(handlerType);
-        await messageHandler.HandleMessage(message, priority, lastAttempt, stoppingToken);
+        await messageHandler.HandleMessage(message, priority, IsLastAttempt(messageDetails), stoppingToken);
+    }
+
+    private bool IsLastAttempt(MessageDetails messageDetails)
+    {
+        return messageDetails.Message.DequeueCount >= _workerOptions.MaxRetryCount;
     }
 
     private (Type MessageType, Type HandlerType) GetDataTypes(QueueMessage message)
