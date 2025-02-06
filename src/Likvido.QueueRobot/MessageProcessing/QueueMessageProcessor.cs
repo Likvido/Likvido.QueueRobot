@@ -146,7 +146,7 @@ internal sealed class QueueMessageProcessor : IDisposable
         jsonSerializerOptions.Converters.Add(new LikvidoPriorityConverter());
 
         var message = JsonSerializer.Deserialize(
-            messageDetails.Message.GetMessageText(),
+            messageDetails.Message.GetMessageText(_logger),
             cloudEventType,
             jsonSerializerOptions)!;
 
@@ -161,7 +161,7 @@ internal sealed class QueueMessageProcessor : IDisposable
 
     private (Type MessageType, Type HandlerType) GetDataTypes(QueueMessage message)
     {
-        var messageText = message.GetMessageText();
+        var messageText = message.GetMessageText(_logger);
         var document = JsonDocument.Parse(messageText);
 
         var type =
