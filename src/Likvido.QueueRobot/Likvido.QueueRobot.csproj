@@ -10,7 +10,7 @@
 
     <ItemGroup>
         <PackageReference Include="Likvido.CloudEvents" Version="1.0.2"/>
-        <PackageReference Include="Likvido.Robot" Version="2.2.0" />
+        <PackageReference Include="Likvido.Robot" Version="2.2.1" />
         <PackageReference Include="Azure.Storage.Queues" Version="12.21.0"/>
         <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.1" />
         <PackageReference Include="Polly.Core" Version="8.5.2" />
