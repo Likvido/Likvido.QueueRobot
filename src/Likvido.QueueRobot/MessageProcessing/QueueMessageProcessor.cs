@@ -286,7 +286,11 @@ internal sealed class QueueMessageProcessor : IDisposable
                 BackoffType = DelayBackoffType.Exponential,
                 OnRetry = args =>
                 {
-                    _logger.LogError(args.Outcome.Exception, failureText, _queueName, args.AttemptNumber);
+                    // Don't log OperationCanceledExceptions since these are handled
+                    if(args.Outcome.Exception is not OperationCanceledException)
+                    {
+                        _logger.LogError(args.Outcome.Exception, failureText, _queueName, args.AttemptNumber);
+                    }
                     return default;
                 }
             })
