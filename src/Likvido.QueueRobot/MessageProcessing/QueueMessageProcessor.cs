@@ -94,6 +94,11 @@ internal sealed class QueueMessageProcessor : IDisposable
         }
         catch (Exception ex)
         {
+            using var exceptionScope = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["MessageText"] = messageDetails?.Message.GetMessageText(_logger) ?? "Message text is not available"
+            });
+
             if (messageDetails == null)
             {
                 _logger.LogError(ex, "Unhandled exception occurred during message processing, and messageDetails is null.");
