@@ -19,9 +19,9 @@ public class QueueEngine(
     {
         AssertAllMessageHandlersCanBeConstructed();
 
-        for (var i = 0; i < options.MaxMessagesToProcess; i++)
+        var messageProcessed = false;
+        do
         {
-            var messageProcessed = false;
             if (!string.IsNullOrWhiteSpace(options.HighPriorityQueueName))
             {
                 messageProcessed = await ProcessMessageFromQueue(options.HighPriorityQueueName, LikvidoPriority.High, cancellationToken);
@@ -32,17 +32,16 @@ public class QueueEngine(
                 messageProcessed = await ProcessMessageFromQueue(options.QueueName, LikvidoPriority.Normal, cancellationToken);
             }
 
-            if (!messageProcessed)
-            {
-                logger.LogInformation("No messages in any queue, stopping...");
-                break;
-            }
-
             if (cancellationToken.IsCancellationRequested)
             {
                 logger.LogInformation("Cancellation requested, stopping...");
                 break;
             }
+        } while (messageProcessed);
+
+        if (!messageProcessed)
+        {
+            logger.LogInformation("No messages in any queue, stopping...");
         }
     }
 
