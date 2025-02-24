@@ -24,12 +24,6 @@ public class QueueRobotOptions
     public string? HighPriorityQueueName { get; set; }
 
     /// <summary>
-    /// The maximum number of messages to process before the robot stops
-    /// Default is 1
-    /// </summary>
-    public int MaxMessagesToProcess { get; set; } = 1;
-
-    /// <summary>
     /// The maximum number of times a message will be retried
     /// Default is 5
     /// </summary>
