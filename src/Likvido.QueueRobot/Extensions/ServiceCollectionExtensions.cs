@@ -9,19 +9,34 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddQueueRobot(this IServiceCollection services, Action<QueueRobotOptions> configureOptions)
     {
-        services.AddOptions<QueueRobotOptions>()
-            .Configure(configureOptions)
-            .ValidateDataAnnotations()
-            .PostConfigure(options =>
-            {
-                foreach (var mapping in options.EventTypeHandlerDictionary)
-                {
-                    services.AddScoped(mapping.Value.HandlerType);
-                }
-            });
+        // Create a temporary service provider to configure and access options
+        var tempServices = new ServiceCollection();
 
-        // Register the options for convenience, to avoid having to resolve IOptions<QueueRobotOptions>
-        services.AddSingleton(sp => sp.GetRequiredService<IOptions<QueueRobotOptions>>().Value);
+        // Configure options in the temporary collection
+        tempServices.AddOptions<QueueRobotOptions>()
+            .Configure(configureOptions)
+            .ValidateDataAnnotations();
+
+        // Build the temporary provider
+        using (var tempProvider = tempServices.BuildServiceProvider())
+        {
+            // Get the configured options
+            var options = tempProvider.GetRequiredService<IOptions<QueueRobotOptions>>().Value;
+
+            // Register handlers right away using the resolved options
+            foreach (var mapping in options.EventTypeHandlerDictionary)
+            {
+                services.AddScoped(mapping.Value.HandlerType);
+            }
+
+            // Configure options in the main service collection
+            services.AddOptions<QueueRobotOptions>()
+                .Configure(configureOptions)
+                .ValidateDataAnnotations();
+
+            // Register the options for convenience
+            services.AddSingleton(sp => sp.GetRequiredService<IOptions<QueueRobotOptions>>().Value);
+        }
 
         return services;
     }
