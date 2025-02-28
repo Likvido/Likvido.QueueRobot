@@ -22,6 +22,9 @@ public class QueueEngine(
         var messageProcessed = false;
         do
         {
+            // reset messageProcessed at the start of each iteration
+            messageProcessed = false;
+
             if (!string.IsNullOrWhiteSpace(options.HighPriorityQueueName))
             {
                 messageProcessed = await ProcessMessageFromQueue(options.HighPriorityQueueName, LikvidoPriority.High, cancellationToken);
@@ -80,6 +83,7 @@ public class QueueEngine(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            return false; // return false here to prevent endless loop when cancellation happens
         }
         catch (Exception ex)
         {
