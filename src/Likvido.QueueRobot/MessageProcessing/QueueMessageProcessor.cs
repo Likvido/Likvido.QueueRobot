@@ -250,11 +250,11 @@ internal sealed class QueueMessageProcessor : IDisposable
             : _workerOptions.VisibilityTimeout.Divide(2);
         try
         {
-            do
+            while (!token.IsCancellationRequested)
             {
                 await Task.Delay(sleep, token);
                 await UpdateVisibilityTimeout(queueClient, messageDetails, _workerOptions.VisibilityTimeout, token);
-            } while (true);
+            }
         }
         catch (OperationCanceledException)
         {
