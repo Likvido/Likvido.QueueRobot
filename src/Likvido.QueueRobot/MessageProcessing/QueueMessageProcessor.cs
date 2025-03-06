@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using Azure;
 using Azure.Storage.Queues;
 using Azure.Storage.Queues.Models;
 using Likvido.CloudEvents;
@@ -41,7 +42,7 @@ internal sealed class QueueMessageProcessor : IDisposable
         _queueClient = queueClient;
         _workerOptions = workerOptions;
         _serviceProvider = serviceProvider;
-        _deleteMessageResiliencePipeline = GetMessageActionResiliencePipeline("Message deletion from a queue \"{queueName}\" failed #{retryAttempt}");
+        _deleteMessageResiliencePipeline = GetMessageActionResiliencePipeline("Message deletion from a queue \"{queueName}\" failed #{retryAttempt}", false);
         _updateMessageResiliencyPipeline = GetMessageActionResiliencePipeline("Message update in a queue \"{queueName}\" failed #{retryAttempt}");
         _queueName = queueName;
     }
@@ -196,9 +197,22 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 await updateVisibilityStopAction.DisposeAsync();
             }
-            await _deleteMessageResiliencePipeline
-                .ExecuteAsync(async cancellationToken =>
-                    await queueClient.DeleteMessageAsync(messageDetails.Message.MessageId, messageDetails.Receipt, cancellationToken));
+
+            try
+            {
+                await _deleteMessageResiliencePipeline
+                    .ExecuteAsync(async cancellationToken =>
+                        await queueClient.DeleteMessageAsync(messageDetails.Message.MessageId, messageDetails.Receipt, cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                // If it failed to delete message because it was not found ignore as it
+                // was handled by another worker
+                if (!IsMessageNotFoundError(ex))
+                {
+                    throw;
+                }
+            }
         });
     }
 
@@ -281,7 +295,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             messageDetails.Receipt = result.Value.PopReceipt;
         }, token);
 
-    private ResiliencePipeline GetMessageActionResiliencePipeline(string failureText) =>
+    private ResiliencePipeline GetMessageActionResiliencePipeline(string failureText, bool logNotFounds = true) =>
         new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
             {
@@ -292,14 +306,23 @@ internal sealed class QueueMessageProcessor : IDisposable
                 OnRetry = args =>
                 {
                     // Don't log OperationCanceledExceptions since these are handled
-                    if(args.Outcome.Exception is not OperationCanceledException)
+                    if(args.Outcome.Exception is OperationCanceledException || (!logNotFounds && IsMessageNotFoundError(args.Outcome.Exception)))
+                    {
+                        return default;
+                    }
+                    else
                     {
                         _logger.LogError(args.Outcome.Exception, failureText, _queueName, args.AttemptNumber);
+                        return default;
                     }
-                    return default;
                 }
             })
             .Build();
+
+    private bool IsMessageNotFoundError(Exception? exception)
+    {
+        return exception != null && exception is RequestFailedException && ((RequestFailedException)exception).ErrorCode == "MessageNotFound";
+    }
 
     /// <summary>
     /// All operations to a message need to be done via this helper function
