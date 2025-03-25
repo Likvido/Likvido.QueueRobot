@@ -56,7 +56,7 @@ internal sealed class QueueMessageProcessor : IDisposable
 
         using var _ = _logger.BeginScope(new Dictionary<string, object>
         {
-            ["MessageId"] = queueMessage.MessageId,
+            ["QueueMessageId"] = queueMessage.MessageId,
             ["QueueName"] = _queueName,
             ["Priority"] = Enum.GetName(priority) ?? "Unknown"
         });
