@@ -90,7 +90,14 @@ internal sealed class QueueMessageProcessor : IDisposable
 
             if (!processed && messageDetails != null)
             {
-                await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
+                if (IsLastAttempt(messageDetails))
+                {
+                    await TryMoveToPoisonAsync(_queueClient, messageDetails, updateVisibilityStopAction);
+                }
+                else
+                {
+                    await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
+                }
             }
         }
         catch (Exception ex)
