@@ -92,6 +92,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             {
                 if (IsLastAttempt(messageDetails))
                 {
+                    _logger.LogError(postponeProcessingException, "We have reached the maximum retry count for message {MessageId}, so we cannot postpone it again. Moving to poison queue.", messageDetails.Message.MessageId);
                     await TryMoveToPoisonAsync(_queueClient, messageDetails, updateVisibilityStopAction);
                 }
                 else
