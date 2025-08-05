@@ -84,12 +84,12 @@ internal sealed class QueueMessageProcessor : IDisposable
         {
             _logger.LogInformation("Operation was cancelled.");
         }
-        catch (PostponeProcessingException postponeProcessingException)
+        catch (PostponeProcessingStrategyException postponeProcessingException)
         {
-            _logger.LogInformation(postponeProcessingException, "Postpone processing for {PostponeTime}", postponeProcessingException.PostponeTime);
-
             if (!processed && messageDetails != null)
             {
+                _logger.LogInformation(postponeProcessingException, "Postpone processing for {PostponeTime}", postponeProcessingException.PostponeTime(messageDetails.Message.DequeueCount));
+
                 if (IsLastAttempt(messageDetails))
                 {
                     _logger.LogError(postponeProcessingException, "We have reached the maximum retry count for message {MessageId}, so we cannot postpone it again. Moving to poison queue.", messageDetails.Message.MessageId);
@@ -97,7 +97,7 @@ internal sealed class QueueMessageProcessor : IDisposable
                 }
                 else
                 {
-                    await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime, stoppingToken);
+                    await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime(messageDetails.Message.DequeueCount), stoppingToken);
                 }
             }
         }
