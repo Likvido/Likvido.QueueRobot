@@ -16,7 +16,7 @@
         <PackageReference Include="Likvido.Robot" Version="2.3.0" />
         <PackageReference Include="Azure.Storage.Queues" Version="12.23.0" />
         <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.8" />
-        <PackageReference Include="Polly.Core" Version="8.6.2" />
+        <PackageReference Include="Polly.Core" Version="8.6.3" />
     </ItemGroup>
 
 </Project>
