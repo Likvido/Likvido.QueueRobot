@@ -2,7 +2,7 @@ using Likvido.CloudEvents;
 
 namespace Likvido.QueueRobot.MessageHandling;
 
-public interface IMessageHandler<in TCloudEvent, TMessage> : IMessageHandlerBase where TCloudEvent : CloudEvent<TMessage>
+public interface IMessageHandler<in TCloudEvent, TMessage> where TCloudEvent : CloudEvent<TMessage>
 {
     /// <summary>
     /// Handles the queue message
