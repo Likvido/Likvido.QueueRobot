@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Linq;
 using Azure.Storage.Queues;
 using JetBrains.Annotations;
 using Likvido.CloudEvents;
@@ -50,7 +51,7 @@ public class QueueEngine(
 
     private void AssertAllMessageHandlersCanBeConstructed()
     {
-        foreach (var (_, handlerType) in options.EventTypeHandlerDictionary.Values)
+        foreach (var handlerType in options.EventExecutors.Select(e => e.HandlerType).Distinct())
         {
             serviceProvider.GetRequiredService(handlerType);
         }

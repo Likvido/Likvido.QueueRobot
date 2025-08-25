@@ -1,3 +1,4 @@
+using System.Linq;
 using JetBrains.Annotations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -23,10 +24,10 @@ public static class ServiceCollectionExtensions
             // Get the configured options
             var options = tempProvider.GetRequiredService<IOptions<QueueRobotOptions>>().Value;
 
-            // Register handlers right away using the resolved options
-            foreach (var mapping in options.EventTypeHandlerDictionary)
+            // Register handlers right away using the resolved options (distinct handler types)
+            foreach (var handlerType in options.EventExecutors.Select(e => e.HandlerType).Distinct())
             {
-                services.AddScoped(mapping.Value.HandlerType);
+                services.AddScoped(handlerType);
             }
 
             // Configure options in the main service collection
