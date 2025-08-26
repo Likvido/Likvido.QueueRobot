@@ -35,17 +35,17 @@ internal sealed class EventExecutor<TMessageHandler, TEvent>(string eventType) :
         }
     }
 
-    private static ClaimsPrincipal GetPrincipalFromMessage(CloudEvent<TEvent> message)
+    private static ClaimsPrincipal? GetPrincipalFromMessage(CloudEvent<TEvent> message)
     {
         if (message.LikvidoUserClaimsString is null)
         {
-            return new ClaimsPrincipal(new ClaimsIdentity());
+            return null;
         }
 
         var userClaims = JsonSerializer.Deserialize<List<KeyValuePair<string, string>>>(message.LikvidoUserClaimsString);
         if (userClaims is null)
         {
-            return new ClaimsPrincipal(new ClaimsIdentity());
+            return null;
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(
