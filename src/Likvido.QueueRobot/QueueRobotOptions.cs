@@ -1,8 +1,15 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using JetBrains.Annotations;
 using Likvido.CloudEvents;
 using Likvido.QueueRobot.MessageHandling;
 using Likvido.QueueRobot.ValidationAttributes;
+using System.Text.Json;
+using Likvido.QueueRobot.JsonConverters;
+using Likvido.QueueRobot.MessageProcessing;
+using Likvido.QueueRobot.MessageProcessing.EventExecutors;
+using Likvido.QueueRobot.PrincipalProviders;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Likvido.QueueRobot;
 
@@ -36,7 +43,7 @@ public class QueueRobotOptions
     public TimeSpan VisibilityTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     [RequiredCollection]
-    internal IDictionary<string, (Type MessageType, Type HandlerType)> EventTypeHandlerDictionary { get; } = new Dictionary<string, (Type, Type)>(StringComparer.OrdinalIgnoreCase);
+    internal List<IEventExecutor> EventExecutors { get; } = new();
 
     public QueueRobotOptions AddMessageHandler<TMessageHandler, TEvent>()
         where TMessageHandler : IMessageHandler<CloudEvent<TEvent>, TEvent>
@@ -47,12 +54,13 @@ public class QueueRobotOptions
     public QueueRobotOptions AddMessageHandler<TMessageHandler, TEvent>(string eventType)
         where TMessageHandler : IMessageHandler<CloudEvent<TEvent>, TEvent>
     {
-        if (EventTypeHandlerDictionary.ContainsKey(eventType))
+        if (EventExecutors.Any(e => string.Equals(e.EventType, eventType, StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException($"Another message handler is already registered for the event type '{eventType}'");
         }
 
-        EventTypeHandlerDictionary[eventType] = (typeof(TEvent), typeof(TMessageHandler));
+        EventExecutors.Add(new EventExecutor<TMessageHandler, TEvent>(eventType));
+
         return this;
     }
 }

@@ -1,12 +1,10 @@
-using System.Reflection;
 using System.Text.Json;
 using Azure;
 using Azure.Storage.Queues;
 using Azure.Storage.Queues.Models;
 using Likvido.CloudEvents;
 using Likvido.QueueRobot.Exceptions;
-using Likvido.QueueRobot.JsonConverters;
-using Likvido.QueueRobot.MessageHandling;
+using Likvido.QueueRobot.MessageProcessing.EventExecutors;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -149,49 +147,36 @@ internal sealed class QueueMessageProcessor : IDisposable
 
     private async Task ProcessMessage(MessageDetails messageDetails, LikvidoPriority priority, IServiceScope scope, CancellationToken stoppingToken)
     {
-        var (messageType, handlerType) = GetDataTypes(messageDetails.Message);
-        var cloudEventType = typeof(CloudEvent<>).MakeGenericType(messageType);
-        var jsonSerializerOptions = new JsonSerializerOptions
+        var messageJson = messageDetails.Message.GetMessageText(_logger);
+
+        // Parse once and reuse the DOM
+        using var document = JsonDocument.Parse(messageJson);
+        var root = document.RootElement;
+
+        // Resolve executor by event type (case-insensitive), fall back to wildcard "*"
+        var eventType = root.EnumerateObject()
+            .Where(property => string.Equals(property.Name, "Type", StringComparison.OrdinalIgnoreCase))
+            .Select(property => property.Value.GetString())
+            .FirstOrDefault();
+
+        IEventExecutor? executor = null;
+        if (eventType != null)
         {
-            PropertyNameCaseInsensitive = true,
-            AllowTrailingCommas = true,
-            ReadCommentHandling = JsonCommentHandling.Skip
-        };
-        jsonSerializerOptions.Converters.Add(new LikvidoPriorityConverter());
+            executor = _workerOptions.EventExecutors.FirstOrDefault(e => string.Equals(e.EventType, eventType, StringComparison.OrdinalIgnoreCase));
+        }
+        executor ??= _workerOptions.EventExecutors.FirstOrDefault(e => e.EventType == "*");
+        if (executor is null)
+        {
+            throw new InvalidOperationException($"Event type is not registered in the EventExecutors: '{eventType}'");
+        }
 
-        var message = JsonSerializer.Deserialize(
-            messageDetails.Message.GetMessageText(_logger),
-            cloudEventType,
-            jsonSerializerOptions)!;
-
-        var messageHandler = (IMessageHandlerBase)scope.ServiceProvider.GetRequiredService(handlerType);
-        await messageHandler.HandleMessage(message, priority, IsLastAttempt(messageDetails), stoppingToken);
+        // Execute the event-specific executor; it is responsible for principal setup/teardown
+        await executor.Execute(scope.ServiceProvider, root, priority, IsLastAttempt(messageDetails), stoppingToken);
     }
 
     private bool IsLastAttempt(MessageDetails messageDetails)
     {
         return messageDetails.Message.DequeueCount >= _workerOptions.MaxRetryCount;
-    }
-
-    private (Type MessageType, Type HandlerType) GetDataTypes(QueueMessage message)
-    {
-        var messageText = message.GetMessageText(_logger);
-        var document = JsonDocument.Parse(messageText);
-
-        var type =
-            document.RootElement.EnumerateObject()
-                .Where(property => string.Equals(property.Name, "Type", StringComparison.OrdinalIgnoreCase))
-                .Select(property => property.Value.GetString()).FirstOrDefault();
-
-        if (type == null || !_workerOptions.EventTypeHandlerDictionary.TryGetValue(type, out var dataType))
-        {
-            if (!_workerOptions.EventTypeHandlerDictionary.TryGetValue("*", out dataType))
-            {
-                throw new InvalidOperationException($"Event type is not registered in the {nameof(_workerOptions.EventTypeHandlerDictionary)}: '{type}'");
-            }
-        }
-
-        return dataType;
     }
 
     private async Task DeleteMessageAsync(
