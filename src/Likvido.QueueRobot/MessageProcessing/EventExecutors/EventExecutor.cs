@@ -43,7 +43,7 @@ internal sealed class EventExecutor<TMessageHandler, TEvent>(string eventType) :
         }
 
         var userClaims = JsonSerializer.Deserialize<List<KeyValuePair<string, string>>>(message.LikvidoUserClaimsString);
-        if (userClaims is null)
+        if (userClaims is null || userClaims.Count == 0)
         {
             return null;
         }
