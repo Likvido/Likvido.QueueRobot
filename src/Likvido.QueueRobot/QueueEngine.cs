@@ -82,9 +82,13 @@ public class QueueEngine(
 
             await processor.ProcessMessage(queueMessage, priority, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex)
         {
-            return false; // return false here to prevent endless loop when cancellation happens
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Unexpected cancellation during queue processing, stopping");
+            }
+            return false;
         }
         catch (Exception ex)
         {
