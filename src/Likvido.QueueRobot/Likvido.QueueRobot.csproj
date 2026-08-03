@@ -15,6 +15,9 @@
         <PackageReference Include="Likvido.CloudEvents" Version="1.2.0" />
         <PackageReference Include="Likvido.Robot" Version="2.3.36" />
         <PackageReference Include="Azure.Storage.Queues" Version="12.27.1" />
+        <!-- Pinned above Azure.Storage.Queues' floor (1.55.0) for AIKIDO-2026-895105:
+             Azure.Core < 1.59.0 re-attaches the Authorization header on cross-host redirects. -->
+        <PackageReference Include="Azure.Core" Version="1.60.0" />
         <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.10" />
         <PackageReference Include="Polly.Core" Version="8.7.0" />
     </ItemGroup>
