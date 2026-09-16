@@ -19,7 +19,7 @@
              Azure.Core < 1.59.0 re-attaches the Authorization header on cross-host redirects. -->
         <PackageReference Include="Azure.Core" Version="1.62.0" />
         <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.12" />
-        <PackageReference Include="Polly.Core" Version="8.7.0" />
+        <PackageReference Include="Polly.Core" Version="8.8.0" />
     </ItemGroup>
 
 </Project>
