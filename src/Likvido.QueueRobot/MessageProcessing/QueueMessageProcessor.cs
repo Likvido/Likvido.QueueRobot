@@ -305,7 +305,7 @@ internal sealed class QueueMessageProcessor : IDisposable
                     }
                     else
                     {
-                        _logger.LogError(args.Outcome.Exception, failureText, _queueName, args.AttemptNumber);
+                        _logger.LogWarning(args.Outcome.Exception, failureText, _queueName, args.AttemptNumber);
                         return default;
                     }
                 }
