@@ -14,6 +14,8 @@ namespace Likvido.QueueRobot.MessageProcessing;
 
 internal sealed class QueueMessageProcessor : IDisposable
 {
+    private static readonly TimeSpan MaximumVisibilityTimeout = TimeSpan.FromDays(7);
+
     private readonly ILogger _logger;
     private readonly QueueRobotOptions _workerOptions;
     private readonly IServiceProvider _serviceProvider;
@@ -95,7 +97,16 @@ internal sealed class QueueMessageProcessor : IDisposable
                 }
                 else
                 {
-                    await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime(messageDetails.Message.DequeueCount), stoppingToken);
+                    try
+                    {
+                        await UpdateVisibilityTimeout(_queueClient, messageDetails, postponeProcessingException.PostponeTime(messageDetails.Message.DequeueCount), stoppingToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to postpone message {MessageId}. Message will be retried within {VisibilityTimeoutTotalSeconds} seconds.",
+                            messageDetails.Message.MessageId,
+                            _workerOptions.VisibilityTimeout.TotalSeconds);
+                    }
                 }
             }
         }
@@ -273,7 +284,16 @@ internal sealed class QueueMessageProcessor : IDisposable
         }
     }
 
-    private async Task UpdateVisibilityTimeout(QueueClient queueClient, MessageDetails messageDetails, TimeSpan newVisibilityTimeout, CancellationToken token) =>
+    private async Task UpdateVisibilityTimeout(QueueClient queueClient, MessageDetails messageDetails, TimeSpan newVisibilityTimeout, CancellationToken token)
+    {
+        if (newVisibilityTimeout > MaximumVisibilityTimeout)
+        {
+            _logger.LogWarning("Requested visibility timeout {RequestedVisibilityTimeout} exceeds Azure's 7-day limit. Clamping to {MaximumVisibilityTimeout}.",
+                newVisibilityTimeout,
+                MaximumVisibilityTimeout);
+            newVisibilityTimeout = MaximumVisibilityTimeout;
+        }
+
         await ModifyMessageAsync(async () =>
         {
             var result = await _updateMessageResiliencyPipeline.ExecuteAsync(async cancellationToken =>
@@ -287,6 +307,7 @@ internal sealed class QueueMessageProcessor : IDisposable
             //all further operations should be done with the new receipt otherwise we get 404
             messageDetails.Receipt = result.Value.PopReceipt;
         }, token);
+    }
 
     private ResiliencePipeline GetMessageActionResiliencePipeline(string failureText, bool logNotFounds = true) =>
         new ResiliencePipelineBuilder()
