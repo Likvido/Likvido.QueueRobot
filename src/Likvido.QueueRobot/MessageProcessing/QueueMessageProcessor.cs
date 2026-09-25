@@ -15,6 +15,7 @@ namespace Likvido.QueueRobot.MessageProcessing;
 internal sealed class QueueMessageProcessor : IDisposable
 {
     private static readonly TimeSpan MaximumVisibilityTimeout = TimeSpan.FromDays(7);
+    private static readonly TimeSpan VisibilityTimeoutExpirySafetyMargin = TimeSpan.FromSeconds(5);
 
     private readonly ILogger _logger;
     private readonly QueueRobotOptions _workerOptions;
@@ -296,6 +297,24 @@ internal sealed class QueueMessageProcessor : IDisposable
 
         await ModifyMessageAsync(async () =>
         {
+            var timeUntilExpiry = messageDetails.Message.ExpiresOn - DateTimeOffset.UtcNow - VisibilityTimeoutExpirySafetyMargin;
+            if (timeUntilExpiry <= TimeSpan.Zero)
+            {
+                _logger.LogDebug("Skipping visibility update for message {MessageId} because it is expired or within the expiry safety margin.", messageDetails.Message.MessageId);
+                return;
+            }
+
+            if (newVisibilityTimeout > timeUntilExpiry)
+            {
+                newVisibilityTimeout = timeUntilExpiry;
+            }
+
+            if (newVisibilityTimeout <= TimeSpan.Zero)
+            {
+                _logger.LogDebug("Skipping visibility update for message {MessageId} because no positive visibility period remains.", messageDetails.Message.MessageId);
+                return;
+            }
+
             var result = await _updateMessageResiliencyPipeline.ExecuteAsync(async cancellationToken =>
                 await queueClient.UpdateMessageAsync(
                     messageDetails.Message.MessageId,
