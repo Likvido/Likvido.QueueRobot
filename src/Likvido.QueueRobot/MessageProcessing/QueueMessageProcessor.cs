@@ -297,16 +297,19 @@ internal sealed class QueueMessageProcessor : IDisposable
 
         await ModifyMessageAsync(async () =>
         {
-            var timeUntilExpiry = messageDetails.Message.ExpiresOn - DateTimeOffset.UtcNow - VisibilityTimeoutExpirySafetyMargin;
-            if (timeUntilExpiry <= TimeSpan.Zero)
+            if (messageDetails.Message.ExpiresOn.HasValue)
             {
-                _logger.LogDebug("Skipping visibility update for message {MessageId} because it is expired or within the expiry safety margin.", messageDetails.Message.MessageId);
-                return;
-            }
+                var timeUntilExpiry = messageDetails.Message.ExpiresOn.Value - DateTimeOffset.UtcNow - VisibilityTimeoutExpirySafetyMargin;
+                if (timeUntilExpiry <= TimeSpan.Zero)
+                {
+                    _logger.LogDebug("Skipping visibility update for message {MessageId} because it is expired or within the expiry safety margin.", messageDetails.Message.MessageId);
+                    return;
+                }
 
-            if (newVisibilityTimeout > timeUntilExpiry)
-            {
-                newVisibilityTimeout = timeUntilExpiry;
+                if (newVisibilityTimeout > timeUntilExpiry)
+                {
+                    newVisibilityTimeout = timeUntilExpiry;
+                }
             }
 
             if (newVisibilityTimeout <= TimeSpan.Zero)
