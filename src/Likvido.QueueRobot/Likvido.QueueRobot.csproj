@@ -18,7 +18,7 @@
         <!-- Pinned above Azure.Storage.Queues' floor (1.55.0) for AIKIDO-2026-895105:
              Azure.Core < 1.59.0 re-attaches the Authorization header on cross-host redirects. -->
         <PackageReference Include="Azure.Core" Version="1.65.0" />
-        <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.14" />
+        <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="11.0.0" />
         <PackageReference Include="Polly.Core" Version="8.9.1" />
     </ItemGroup>
 
